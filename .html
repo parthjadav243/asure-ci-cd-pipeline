@@ -1,0 +1,249 @@
+"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Azure CI/CD Pipeline with Docker & Jenkins</title>
+  <link rel="stylesheet" href="azure-docker-jenkins-cicd.css" />
+  <meta name="description" content="A clean, responsive reference page summarizing how to set up a CI/CD pipeline on Azure using Docker and Jenkins." />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container header-inner">
+      <div class="logo">
+        <span class="logo-dot"></span>
+        <span>Azure CI/CD • Docker • Jenkins</span>
+      </div>
+      <nav class="nav">
+        <a href="#overview">Overview</a>
+        <a href="#architecture">Architecture</a>
+        <a href="#pipeline">Pipeline Steps</a>
+        <a href="#jenkinsfile">Jenkinsfile</a>
+        <a href="#dockerfile">Dockerfile</a>
+        <a href="#azure">Azure Setup</a>
+        <a href="#tips">Tips</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="container">
+        <h1>Azure CI/CD with Docker &amp; Jenkins</h1>
+        <p class="subtitle">From commit to container to cloud — a minimal, production-ready pipeline template.</p>
+        <ul class="badges">
+          <li>GitHub / GitLab</li>
+          <li>Jenkins</li>
+          <li>Docker</li>
+          <li>Azure Container Registry</li>
+          <li>Azure Web App for Containers</li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="overview" class="card container">
+      <h2>Overview</h2>
+      <p>
+        This page gives you a ready-to-use skeleton for a modern CI/CD pipeline on <strong>Microsoft Azure</strong>
+        using <strong>Jenkins</strong> and <strong>Docker</strong>. It covers a clean folder layout, a sample
+        <code>Jenkinsfile</code>, a minimal <code>Dockerfile</code>, and Azure CLI snippets to deploy your app to an
+        <em>Azure Web App for Containers</em> or any other Azure target of your choice.
+      </p>
+      <div class="grid two">
+        <div>
+          <h3>Prerequisites</h3>
+          <ul class="checklist">
+            <li>Azure subscription + <code>az</code> CLI signed in</li>
+            <li>Jenkins server/agent with Docker &amp; Azure CLI</li>
+            <li>Azure Container Registry (ACR)</li>
+            <li>Git repository with app source</li>
+          </ul>
+        </div>
+        <div>
+          <h3>What you get</h3>
+          <ul class="checklist">
+            <li>Dockerized build &amp; test stages</li>
+            <li>Image publish to ACR</li>
+            <li>Deploy to Azure Web App for Containers</li>
+            <li>Versioned, repeatable pipeline</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="architecture" class="container card">
+      <h2>Reference Architecture</h2>
+      <div class="arch">
+        <div class="arch-node cloud">Git Host
+          <span class="arch-small">GitHub / GitLab / Bitbucket</span>
+        </div>
+        <div class="arch-arrow">webhook</div>
+        <div class="arch-node jenkins">Jenkins
+          <span class="arch-small">Build • Test • Push</span>
+        </div>
+        <div class="arch-arrow">push/pull</div>
+        <div class="arch-node registry">Azure Container Registry
+          <span class="arch-small">myacr.azurecr.io</span>
+        </div>
+        <div class="arch-arrow">deploy</div>
+        <div class="arch-node app">Azure Web App for Containers
+          <span class="arch-small">Production / Staging</span>
+        </div>
+      </div>
+      <p class="note">Swap Web App slots (staging → production) for zero-downtime releases.</p>
+    </section>
+
+    <section id="pipeline" class="container card">
+      <h2>Pipeline Stages</h2>
+      <ol class="steps">
+        <li><strong>Checkout</strong> – pull the repo at the triggered commit/PR.</li>
+        <li><strong>Build</strong> – create a versioned Docker image (e.g., <code>1.2.3</code> + <code>git sha</code>).</li>
+        <li><strong>Test</strong> – run unit/integration tests inside the container.</li>
+        <li><strong>Push</strong> – push tagged images to <abbr title="Azure Container Registry">ACR</abbr>.</li>
+        <li><strong>Deploy</strong> – update the Azure Web App to the new image (or Helm/K8s if using AKS).</li>
+      </ol>
+    </section>
+
+    <section id="jenkinsfile" class="container card">
+      <h2>Sample Jenkinsfile</h2>
+      <p>Drop this in your repo root as <code>Jenkinsfile</code>. Adjust env vars as needed.</p>
+<pre><code>pipeline {
+  agent any
+
+  environment {
+    ACR_NAME      = 'myacr'                      // &lt;-- your ACR name
+    ACR_LOGIN     = "\${ACR_NAME}.azurecr.io"
+    IMAGE_NAME    = 'myapp'
+    VERSION       = sh(script: 'git describe --tags --always', returnStdout: true).trim()
+    IMAGE_TAG     = "\${ACR_LOGIN}/\${IMAGE_NAME}:\${VERSION}"
+    LATEST_TAG    = "\${ACR_LOGIN}/\${IMAGE_NAME}:latest"
+    AZ_RESOURCE_G = 'rg-myapp'
+    AZ_WEBAPP     = 'myapp-web'
+    AZ_SLOT       = 'staging'                     // optional: staging slot
+  }
+
+  options { timestamps() }
+
+  stages {
+    stage('Checkout') {
+      steps { checkout scm }
+    }
+
+    stage('Docker Build') {
+      steps {
+        sh '''
+          docker build -t "${IMAGE_TAG}" -t "${LATEST_TAG}" .
+        '''
+      }
+    }
+
+    stage('Test') {
+      steps {
+        sh '''
+          # run your test command(s) here
+          docker run --rm "${IMAGE_TAG}" ./run-tests.sh || exit 1
+        '''
+      }
+    }
+
+    stage('Login &amp; Push to ACR') {
+      steps {
+        sh '''
+          az acr login -n "${ACR_NAME}"
+          docker push "${IMAGE_TAG}"
+          docker push "${LATEST_TAG}"
+        '''
+      }
+    }
+
+    stage('Deploy to Azure Web App') {
+      steps {
+        sh '''
+          az webapp config container set \
+            --name "${AZ_WEBAPP}" \
+            --resource-group "${AZ_RESOURCE_G}" \
+            --docker-custom-image-name "${IMAGE_TAG}"
+
+          # Optional slot swap for zero-downtime release
+          if [ -n "${AZ_SLOT}" ]; then
+            az webapp deployment slot swap \
+              --resource-group "${AZ_RESOURCE_G}" \
+              --name "${AZ_WEBAPP}" \
+              --slot "${AZ_SLOT}" \
+              --target-slot production
+          fi
+        '''
+      }
+    }
+  }
+
+  post {
+    always {
+      sh 'docker image prune -f || true'
+      archiveArtifacts artifacts: 'Dockerfile', onlyIfSuccessful: false
+    }
+  }
+}
+</code></pre>
+    </section>
+
+    <section id="dockerfile" class="container card">
+      <h2>Minimal Dockerfile</h2>
+<pre><code># syntax=docker/dockerfile:1
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --prefer-offline --no-audit --progress=false
+COPY . .
+RUN npm run build
+
+FROM node:20-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /app/dist ./dist
+COPY package*.json ./
+RUN npm ci --omit=dev --prefer-offline --no-audit --progress=false
+EXPOSE 3000
+CMD ["node", "dist/server.js"]
+</code></pre>
+      <p class="note">Swap the base image and commands for your stack (Java, .NET, Python, Go, etc.).</p>
+    </section>
+
+    <section id="azure" class="container card">
+      <h2>Azure Setup (CLI)</h2>
+<pre><code># 1) Create resource group
+az group create -n rg-myapp -l eastus
+
+# 2) Create ACR
+az acr create -n myacr -g rg-myapp --sku Basic
+az acr login -n myacr
+
+# 3) Create Web App for Containers (Linux plan)
+az appservice plan create -g rg-myapp -n myapp-plan --is-linux --sku B1
+az webapp create -g rg-myapp -p myapp-plan -n myapp-web --deployment-container-image-name myacr.azurecr.io/myapp:latest
+
+# 4) Optional: staging slot
+az webapp deployment slot create -g rg-myapp -n myapp-web --slot staging
+</code></pre>
+    </section>
+
+    <section id="tips" class="container card">
+      <h2>Pro Tips</h2>
+      <ul class="tips">
+        <li>Use slot-based deployments for safe rollouts and quick rollbacks.</li>
+        <li>Tag images with both a version (e.g., <code>1.4.0</code>) and <code>latest</code>.</li>
+        <li>Restrict ACR access to your Jenkins agent with scoped tokens or managed identity.</li>
+        <li>Cache Docker layers by ordering Dockerfile steps from least to most volatile.</li>
+        <li>Store secrets in Jenkins Credentials and reference them from the pipeline.</li>
+      </ul>
+    </section>
+
+    <footer class="site-footer">
+      <div class="container">
+        <p>Made for quick starts. Customize freely. 🚀</p>
+      </div>
+    </footer>
+  </main>
+</body>
+</html>
+"""
