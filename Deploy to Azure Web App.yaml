@@ -1,0 +1,7 @@
+#  Deploy to Azure Web App
+- task: AzureWebApp@1
+  inputs:
+    azureSubscription: '<Your-Service-Connection>'
+    appName: '<Your-App-Service-Name>'
+    package: '$(System.DefaultWorkingDirectory)/drop/**/*.zip'
+  displayName: "Deploy to Azure Web App"
